@@ -1,0 +1,6 @@
+# PlatformIO build products and downloaded dependencies
+**/.pio/
+
+# Editor workspace state
+.vscode/*.db
+*.code-workspace
