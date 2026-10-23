@@ -1,0 +1,168 @@
+Pressure Cooker Whistle Counter - Arduino IDE setup guide
+========================================================
+This is a human-readable Arduino dependency guide, not a Python pip file.
+It covers the three existing sketches in MCU_code and the new Wi-Fi/mobile
+notification version in WiFi_Whistle_Counter; see section 6 below.
+
+Version status
+--------------
+The original MCU_code PlatformIO files declare LiquidCrystal_I2C@^1.1.4 but
+do not pin board-core versions. Use the exact versions below as a recommended
+Arduino IDE baseline, not as a claim of a previously tested configuration.
+The original sketches have not been compiled as part of this setup-guide change.
+The Wi-Fi variants have been compiled with the versions in section 6; physical
+operation and phone lock-screen delivery still require hardware/deployment checks.
+
+1. Arduino IDE
+--------------
+Use Arduino IDE 2.x. No particular IDE patch release is required by the source.
+
+In File > Preferences > Additional Boards Manager URLs, add the URLs for
+the board families you use (one URL per line in the URL editor):
+
+ESP8266:
+https://arduino.esp8266.com/stable/package_esp8266com_index.json
+
+ESP32:
+https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+2. Board packages and sketch selection
+-------------------------------------
+ESP8266 sketches:
+  MCU_code/Whistle_counter_esp8266_code/Whistle_counter_esp8266_code.ino
+  MCU_code/Whistle_counter_esp8266_multimode/Whistle_counter_esp8266_multimode.ino
+
+  Tools > Board > Boards Manager:
+    Package: esp8266 by ESP8266 Community
+    Version: 3.1.2
+  Tools > Board:
+    Generic ESP8266 Module (the installed hardware)
+  Board identifier (FQBN): esp8266:esp8266:generic
+  For the confirmed 4 MB module, use 4MB (FS:1MB).
+  The legacy PlatformIO files select nodemcuv2; the native GPIO assignments also
+  support Generic ESP8266 Module. Select NodeMCU only for that board variant.
+
+ESP32 sketch:
+  MCU_code/Whistle_counter_esp32_code/Whistle_counter_esp32_code.ino
+
+  Tools > Board > Boards Manager:
+    Package: esp32 by Espressif Systems
+    Version: 2.0.17
+  Tools > Board:
+    ESP32 Dev Module
+  Board identifier (FQBN): esp32:esp32:esp32
+
+  This baseline targets the original ESP32 DevKit / ESP-WROOM-32 family.
+  ESP32-C3, S2, and S3 boards need their own board selection and pin adaptation.
+  Version 2.0.17 is a deliberate 2.x baseline, not a latest-release claim.
+
+3. External library - required by all three sketches
+--------------------------------------------------
+Library: LiquidCrystal_I2C
+Version: 1.1.4
+Author: Frank de Brabander
+Maintainer: Marco Schwartz
+Source: https://github.com/marcoschwartz/LiquidCrystal_I2C
+ZIP: https://github.com/marcoschwartz/LiquidCrystal_I2C/archive/refs/heads/master.zip
+
+Installation:
+  1. Download the ZIP from the source above.
+  2. Confirm library.properties inside the archive says version=1.1.4.
+     The master URL can change; retain the checked archive for repeatable setup.
+  3. In Arduino IDE, choose Sketch > Include Library > Add .ZIP Library.
+  4. Select the downloaded ZIP and restart the IDE if necessary.
+
+Arduino Library Manager lists "LiquidCrystal I2C" by Frank de Brabander,
+but its indexed versions currently stop at 1.1.2. Use the ZIP route above
+to match the repository's 1.1.4 dependency. Do not substitute another library
+solely because it also provides a header named LiquidCrystal_I2C.h.
+If multiple copies are installed, check verbose compilation output to confirm
+the selected library path and version.
+
+The upstream library declares architectures=avr, so the IDE may print an
+architecture compatibility warning for ESP boards. That metadata alone does
+not establish build success or failure; verify the sketch on the chosen board.
+
+4. Libraries supplied by the board package
+-----------------------------------------
+Arduino.h : supplied by the selected ESP8266 or ESP32 core.
+Wire.h    : supplied by the selected core; used for the I2C LCD.
+EEPROM.h  : supplied by the ESP8266 core; used by the ESP8266 sketches.
+
+Do not install separate versions of these through Library Manager. Their
+versions follow the board package selected in section 2.
+Button, Display, SettingsStore, and WhistleDetector in the multimode folder
+are local project modules, not external libraries.
+
+5. Open, verify, and upload
+--------------------------
+Open the .ino matching your hardware, keeping it in its existing folder.
+For the multimode sketch, keep all accompanying .h and .cpp files together.
+Select the board above, select Tools > Port, then click Verify and Upload.
+Set Serial Monitor to 115200 baud for every sketch.
+Follow the matching sketch's pin definitions and wiring notes; ESP8266 and
+ESP32 pin assignments differ. The ESP8266_code README contains ESP32-specific
+setup text, so use the ESP8266 board selection in this guide for that folder.
+
+6. Wi-Fi / installable phone app - installed Generic ESP8266 hardware
+--------------------------------------------------------------------
+Use this sketch for the user's confirmed 4 MB ESP8266 module:
+  WiFi_Whistle_Counter/firmware/Whistle_counter_esp8266_wifi_multimode/
+  Whistle_counter_esp8266_wifi_multimode.ino (inside that folder)
+
+Arduino board package: esp8266 by ESP8266 Community 3.1.2
+Board: Generic ESP8266 Module
+CPU Frequency: 160 MHz
+Flash Size: 4MB (FS:1MB); keep this setting for initializer and main sketch.
+Flash Mode: DOUT; preserve the original working upload/reset configuration.
+FQBN: esp8266:esp8266:generic:xtal=160,eesz=4M1M,FlashMode=dout
+LCD: existing LiquidCrystal_I2C 2.0.0 by Martin Kubovcik / Frank de Brabander
+  is compile-verified; the original 1.1.4 implementation is also supported.
+PlatformIO: espressif8266@4.2.1, generic_esp8266_4m environment, LCD pinned 1.1.4.
+
+Headers supplied by ESP8266 core 3.1.2:
+  ESP8266WiFi.h, ESP8266WebServer.h, WiFiClientSecureBearSSL.h, LittleFS.h,
+  Wire.h, EEPROM.h.
+HttpResponse.h is a local incremental HTTP response parser included in the new
+folder. No separate HTTP library is needed. The local status page uses the
+core-bundled ESP8266WebServer library. ESP32's HTTPClient.h, WiFi.h,
+Preferences.h, ADC-resolution API, and FreeRTOS are not used by this version.
+
+Initialize LittleFS once with:
+  WiFi_Whistle_Counter/tools/InitializeOutbox_esp8266/
+Then upload the ESP8266 main sketch using the SAME flash/filesystem layout.
+Generate ServerConfig.h with webapp/setup.py --board esp8266 (now the default).
+The supplied Wi-Fi settings and existing server header were copied into the
+new folder's ignored local WiFiSecrets.h and ServerConfig.h files.
+
+During listening, a persistent TLS connection handles live delivery. If TLS
+fails, fresh TLS negotiation is deferred until listening completes or is
+cancelled; saved events replay then. See the firmware README for timing limits.
+
+ESP32 alternative (only for actual ESP32 hardware):
+  WiFi_Whistle_Counter/firmware/Whistle_counter_esp32_wifi_multimode/
+  esp32 by Espressif Systems 2.0.17; ESP32 Dev Module;
+  PlatformIO espressif32@6.9.0; setup.py --board esp32;
+  initializer: WiFi_Whistle_Counter/tools/InitializeOutbox/.
+The installed ESP32 package can remain installed; select ESP8266 for this device.
+
+Shared backend runtime: Python 3.12
+Backend direct dependencies:
+  Flask==3.1.2
+  pywebpush==2.0.3
+  gunicorn==23.0.0
+Install from WiFi_Whistle_Counter/webapp/requirements.txt using pip in a venv.
+Optional Docker deployment includes Caddy 2.10.2 for HTTPS.
+Background phone alerts require HTTPS hosting and an always-running worker.
+The PWA uses plain HTML/CSS/JavaScript with no Node.js build dependencies.
+Full setup, wiring, credentials, and phone installation guide:
+  WiFi_Whistle_Counter/README.md
+
+Sources
+-------
+Repository: MCU_code/*/platformio.ini and the sketch #include declarations.
+ESP8266 versions: https://arduino.esp8266.com/stable/package_esp8266com_index.json
+ESP32 installation: https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html
+ESP32 baseline: https://github.com/espressif/arduino-esp32/releases/tag/2.0.17
+LCD version: https://github.com/marcoschwartz/LiquidCrystal_I2C/blob/master/library.properties
+Arduino Library Manager index: https://downloads.arduino.cc/libraries/library_index.json

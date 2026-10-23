@@ -1,0 +1,6 @@
+.local
+.env
+.venv
+data
+__pycache__
+tests

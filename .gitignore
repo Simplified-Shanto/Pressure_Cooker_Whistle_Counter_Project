@@ -4,3 +4,21 @@
 # Editor workspace state
 .vscode/*.db
 *.code-workspace
+
+# Wi-Fi variant: credentials, generated keys, local runtime data
+**/WiFiSecrets.h
+**/ServerConfig.h
+**/.local/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.env
+**/data/
+
+# Native Android alternative: local pairing secret, SDK and build outputs
+**/NativeSecrets.h
+**/local.properties
+**/.gradle/
+**/build/
+**/*.apk
+**/*.keystore

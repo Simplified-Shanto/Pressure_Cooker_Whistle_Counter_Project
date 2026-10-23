@@ -1,0 +1,25 @@
+# Paid service. Review the Render estimate before creating it.
+# Select this file's path when creating the Blueprint from the repository.
+services:
+  - type: web
+    name: pressure-cooker-whistle-counter
+    runtime: python
+    plan: 0.5c-512mb
+    region: singapore
+    rootDir: WiFi_Whistle_Counter/webapp
+    buildCommand: pip install -r requirements.txt
+    startCommand: python serve.py
+    healthCheckPath: /healthz
+    numInstances: 1
+    autoDeployTrigger: "off"
+    disk:
+      name: counter-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: COUNTER_CONFIG
+        value: /etc/secrets/config.json
+      - key: COUNTER_DATABASE
+        value: /var/data/counter.sqlite3
+      - key: PYTHONUNBUFFERED
+        value: "1"

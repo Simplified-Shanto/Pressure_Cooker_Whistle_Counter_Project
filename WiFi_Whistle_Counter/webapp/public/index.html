@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#102c29">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="description" content="Follow your pressure cooker whistle count and receive connection and completion alerts.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/style.css">
+  <title>Whistle Counter</title>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="brand" href="/" aria-label="Whistle Counter home"><img src="/icons/icon-192.png" alt="" width="40" height="40"><span>Whistle Counter<small>A little peace of mind in the kitchen</small></span></a>
+      <button id="install" class="secondary" hidden>Install app</button>
+    </header>
+
+    <p id="message" role="status" aria-live="polite"></p>
+
+    <section id="pairing" class="card pairing" hidden>
+      <p class="eyebrow">YOUR KITCHEN, CONNECTED</p>
+      <h1>Keep an ear on your cooker.</h1>
+      <p>Pair this phone to see the whistle count and receive alerts, even with the screen locked.</p>
+      <form id="pair-form">
+        <label for="pair-key">Phone pairing key</label>
+        <div class="input-row"><input id="pair-key" type="password" autocomplete="current-password" required placeholder="Enter your pairing key"><button type="submit">Pair phone</button></div>
+      </form>
+      <p class="hint">Use the key from your counter setup. Your Wi-Fi password is not the pairing key.</p>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section class="card counter-card" aria-labelledby="session-title">
+        <div class="card-top"><p class="eyebrow">CURRENT SESSION</p><span id="connection" class="badge">Waiting for counter</span></div>
+        <h1 id="session-title">Ready when you are.</h1>
+        <p id="session-description">Choose a target and start listening on the counter.</p>
+        <div class="count-display"><span id="count">—</span><div>whistles<span id="target">No counter connected</span></div></div>
+        <progress id="progress" value="0" max="1" aria-label="Whistle target progress"></progress>
+        <div class="session-footer"><span id="mode">Awaiting first connection</span><span id="last-seen">No heartbeat yet</span></div>
+      </section>
+
+      <section class="card alerts" aria-labelledby="alerts-title">
+        <div><p class="eyebrow">STAY IN THE LOOP</p><h2 id="alerts-title">Alerts on your phone</h2><p id="push-status">Enable notifications for this phone.</p></div>
+        <div class="actions"><button id="enable-push">Enable notifications</button><button id="test-push" class="secondary" disabled>Test in 10 seconds</button><button id="disable-push" class="text-button" hidden>Disable on this phone</button></div>
+        <p id="install-help" class="hint">iPhone: open in Safari, choose Share → Add to Home Screen, then open the installed app and enable notifications. Android: install from your browser menu.</p>
+        <p class="hint">Alerts need internet and notification permission. Focus, battery settings, or a force-stopped browser can delay delivery. Disconnect alerts follow 45 seconds without a heartbeat.</p>
+        <p id="delivery-status" class="hint"></p>
+      </section>
+
+      <section class="history" aria-labelledby="history-title">
+        <div class="section-heading"><h2 id="history-title">Kitchen activity</h2><span>Most recent first</span></div>
+        <ol id="events"><li class="empty">Your counter activity will appear here.</li></ol>
+      </section>
+      <footer><span>Local controls and buzzer stay on the counter.</span><button id="logout" class="text-button">Unpair this phone</button></footer>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,2 @@
+# Normalize Windows launcher scripts in Git and restore CRLF on checkout.
+*.bat text eol=crlf

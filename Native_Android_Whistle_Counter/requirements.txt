@@ -1,0 +1,34 @@
+# Native local Wi-Fi alternative — setup reference, not pip dependencies.
+# Existing WiFi_Whistle_Counter and MCU_code versions remain separate.
+
+ESP8266 Arduino boards package: esp8266 by ESP8266 Community == 3.1.2
+Boards Manager URL: https://arduino.esp8266.com/stable/package_esp8266com_index.json
+Board: Generic ESP8266 Module
+Physical flash: 4 MB
+Flash setting: 4MB (FS:1MB), unchanged from the migrated working device
+CPU: 160 MHz
+Flash mode: DOUT
+Erase Flash: Only Sketch
+Serial: 115200 baud
+Arduino IDE library: LiquidCrystal_I2C == 2.0.0 (Martin Kubovcik / Frank de Brabander, installed here)
+PlatformIO alternative: espressif8266 == 4.2.1; marcoschwartz/LiquidCrystal_I2C == 1.1.4
+Core-provided libraries: ESP8266WiFi, ESP8266WebServer, LittleFS, EEPROM, Wire, BearSSL HMAC/SHA256
+No cloud, HTTPClient, ESP32 core, external JSON library, or notification server is required.
+
+Native Android application:
+  Minimum Android: 8.0 / API 26
+  Compile SDK: 35
+  Target SDK: 35
+  Build Tools: 35.0.0
+  Android Gradle Plugin: 8.13.0
+  Gradle wrapper: 8.14.3
+  JDK: 17 or compatible newer JDK (built here with OpenJDK 21)
+  Java source/target compatibility: 17
+  Runtime libraries: Android platform APIs only
+  Unit tests: junit:junit == 4.13.2
+
+Optional computer-side diagnostic tool: Python 3.10+ (standard library only)
+Firmware timing/settings tests: Python 3.10+ and g++ with C++17/UBSan support
+Firmware tests: python3 tools/test_firmware.py
+Local private files: NativeSecrets.h, WiFiSecrets.h, .local/phone-pairing.txt, android/local.properties
+Build: cd android && ./gradlew assembleDebug testDebugUnitTest lintDebug

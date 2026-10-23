@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./.local:/app/.local:ro
+      - counter_data:/data
+  worker:
+    build: .
+    command: ["python", "worker.py"]
+    restart: unless-stopped
+    volumes:
+      - ./.local:/app/.local:ro
+      - counter_data:/data
+  https:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      COUNTER_DOMAIN: ${COUNTER_DOMAIN:?Run setup.py with your public HTTPS origin first}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+volumes:
+  counter_data:
+  caddy_data:
+  caddy_config:
