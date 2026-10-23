@@ -12,9 +12,9 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 
 public final class CounterService extends Service {
-    public static final String PREFS = "counter", START = "monitor", STOP = "stop";
+    public static final String PREFS = "counter", START = "monitor", STOP = "stop", DISCOVER = "discover";
     private static final int MONITOR_ID = 1, ALARM_ID = 2, OFFLINE_ID = 3;
-    private static final String MONITOR_CHANNEL = "monitor", EVENT_CHANNEL = "counts", CRITICAL_CHANNEL = "critical";
+    private static final String MONITOR_CHANNEL = "monitor";
     private final MonitorPolicy policy = new MonitorPolicy();
     private SharedPreferences prefs;
     private NotificationManager notifications;
@@ -23,6 +23,10 @@ public final class CounterService extends Service {
     private final Handler watchdog = new Handler(Looper.getMainLooper());
     private volatile boolean running;
     private String host, lastError = "";
+    private CounterDiscovery discovery;
+    private final java.util.concurrent.ConcurrentLinkedQueue<String> candidates = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private volatile long nextDiscovery, verifiedAt;
+    private int failures;
     private byte[] pairingKey;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
@@ -32,6 +36,13 @@ public final class CounterService extends Service {
     private AudioFocusRequest focus;
     private long lastSave, lastWakeRenew, lastServiceHeartbeat;
     private boolean startupFailed;
+    private final SharedPreferences.OnSharedPreferenceChangeListener preferenceChanges = (preferences, key) -> {
+        if (!OutageAcknowledgementReceiver.ACKNOWLEDGED_ID.equals(key) || !running) return;
+        synchronized (policy) {
+            refreshAcknowledgement(); reconcileOfflineNotices();
+            notifications.notify(MONITOR_ID, monitorNotification(monitorText()));
+        }
+    };
 
     @Override public void onCreate() {
         super.onCreate();
@@ -40,16 +51,14 @@ public final class CounterService extends Service {
         NotificationChannel monitor = new NotificationChannel(MONITOR_CHANNEL, "Counter monitoring", NotificationManager.IMPORTANCE_LOW);
         monitor.setSound(null, null); monitor.setShowBadge(false);
         notifications.createNotificationChannel(monitor);
-        notifications.createNotificationChannel(new NotificationChannel(EVENT_CHANNEL, "Whistle counts and activity", NotificationManager.IMPORTANCE_HIGH));
-        NotificationChannel critical = new NotificationChannel(CRITICAL_CHANNEL, "Counter unreachable — critical", NotificationManager.IMPORTANCE_HIGH);
-        critical.setDescription("Check the cooker immediately if the loss of connection was unexpected.");
-        critical.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
-        critical.enableVibration(true);
-        notifications.createNotificationChannel(critical);
+        NotificationSettings.createChannels(notifications);
+        // Clear the old unconditional-offline alert when upgrading from 1.1.
+        notifications.cancel(OFFLINE_ID);
         vibrator = getSystemService(Vibrator.class);
         audio = getSystemService(AudioManager.class);
         restore();
+        prefs.registerOnSharedPreferenceChangeListener(preferenceChanges);
+        discovery = new CounterDiscovery(this);
     }
 
     private void restore() {
@@ -61,6 +70,10 @@ public final class CounterService extends Service {
         long age = Math.max(0, System.currentTimeMillis() - savedAt);
         policy.lastSuccess = SystemClock.elapsedRealtime() - Math.min(age, MonitorPolicy.OFFLINE_MS);
         policy.alarm = prefs.getBoolean("alarm", false) && age < MonitorPolicy.OFFLINE_MS;
+        policy.outageId = prefs.getString(OutageAcknowledgementReceiver.OUTAGE_ID, "");
+        policy.ensureOutageId();
+        prefs.edit().putString(OutageAcknowledgementReceiver.OUTAGE_ID, policy.outageId).apply();
+        refreshAcknowledgement();
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -75,12 +88,15 @@ public final class CounterService extends Service {
                 stopSelf(); return START_NOT_STICKY;
             }
         }
-        if (running) return START_STICKY;
+        if (running) {
+            if (intent != null && DISCOVER.equals(intent.getAction())) requestDiscovery(true);
+            return START_STICKY;
+        }
         if (!prefs.getBoolean("monitoring", false)) { stopSelf(); return START_NOT_STICKY; }
         // Promote immediately, before network, locks, or disk work.
         try {
             startForeground(MONITOR_ID, monitorNotification("Connecting to your counter…"));
-            host = Protocol.localHost(prefs.getString("host", ""));
+            host = Protocol.optionalLocalHost(prefs.getString("host", ""));
             pairingKey = Protocol.key(prefs.getString("pairing_key", ""));
             wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WhistleCounter:monitor");
             wakeLock.setReferenceCounted(false);
@@ -94,8 +110,13 @@ public final class CounterService extends Service {
             lastServiceHeartbeat = SystemClock.elapsedRealtime();
             MonitorRecovery.schedule(this);
             updateAlarm();
-            if (policy.offline) unreachable(false);
+            // Persisted outages are not new outages: never sound them again on
+            // service recovery. Keep/remove any existing notice as appropriate.
+            reconcileOfflineNotices();
+            refreshExistingOutageNotice();
+            notifications.notify(MONITOR_ID, monitorNotification(monitorText()));
             watchdog.post(this::checkHealth);
+            requestDiscovery(false);
             thread = new HandlerThread("CounterWifiMonitor"); thread.start();
             handler = new Handler(thread.getLooper()); handler.post(this::poll);
             return START_STICKY;
@@ -112,7 +133,8 @@ public final class CounterService extends Service {
     private Notification.Builder base(String channel, String title, String text) {
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent tap = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this, channel).setSmallIcon(R.drawable.ic_counter)
+        return new Notification.Builder(this, channel).setSmallIcon(R.drawable.ic_notification)
+                .setLargeIcon(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_counter)).setColor(0xff102e28)
                 .setContentTitle(title).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
                 .setContentIntent(tap).setVisibility(Notification.VISIBILITY_PUBLIC);
     }
@@ -122,7 +144,20 @@ public final class CounterService extends Service {
                 .setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_SERVICE).build();
     }
 
-    private HttpURLConnection connect(String nonce, String boot, long cursor) throws Exception {
+    private String monitorText() {
+        return policy.criticalOffline() ? "CRITICAL: connection lost during counting" :
+                policy.offline && policy.outageAcknowledged ? "Counter offline · outage acknowledged" :
+                policy.offline ? "Counter offline · waiting for next connection" : policy.alarm ?
+                "ALARM — reset or acknowledge on the physical counter" :
+                policy.seen ? policy.count + " of " + policy.target + " whistles · " + policy.mode : "Connecting to " + host;
+    }
+
+    private void refreshAcknowledgement() {
+        policy.acknowledgeOutage(prefs.getString(OutageAcknowledgementReceiver.ACKNOWLEDGED_ID, ""));
+    }
+
+    private HttpURLConnection connect(String address, String nonce, String boot, long cursor) throws Exception {
+        if (address.isEmpty()) throw new IOException("Looking for your counter on Wi-Fi…");
         ConnectivityManager manager = getSystemService(ConnectivityManager.class);
         Network wifi = null;
         for (Network network : manager.getAllNetworks()) {
@@ -131,7 +166,7 @@ public final class CounterService extends Service {
         }
         if (wifi == null) throw new IOException("Connect this phone to the counter's Wi-Fi network.");
         // Use Wi-Fi even if Android prefers cellular because the router has no internet.
-        java.net.URL url = new java.net.URL("http://" + host + "/native/v1/state?nonce=" + nonce + "&boot=" + boot + "&after=" + cursor);
+        java.net.URL url = new java.net.URL("http://" + address + "/native/v1/state?nonce=" + nonce + "&boot=" + boot + "&after=" + cursor);
         HttpURLConnection connection = (HttpURLConnection) wifi.openConnection(url);
         connection.setConnectTimeout(2500); connection.setReadTimeout(2500);
         connection.setInstanceFollowRedirects(false); connection.setUseCaches(false);
@@ -152,7 +187,9 @@ public final class CounterService extends Service {
             String nonce = Protocol.nonce(), requestedBoot;
             long requestedCursor;
             synchronized (policy) { requestedBoot = policy.boot; requestedCursor = policy.cursor; }
-            connection = connect(nonce, requestedBoot, requestedCursor);
+            String candidate = candidates.poll();
+            String requestHost = candidate == null ? host : candidate;
+            connection = connect(requestHost, nonce, requestedBoot, requestedCursor);
             int code = connection.getResponseCode();
             if (code != 200) throw new IOException(code == 401 ? "Pairing key does not match this counter." :
                     code == 404 ? "Native firmware is not installed at this IP address." : "Counter HTTP error " + code);
@@ -174,6 +211,8 @@ public final class CounterService extends Service {
                 throw new IOException("Stale or unsupported counter response.");
             String boot = snapshot.getString("boot_id"), device = snapshot.getString("device_id");
             if (!boot.matches("[a-f0-9]{22}") || !device.matches("[a-f0-9]{6}")) throw new IOException("Invalid counter identity.");
+            String expectedDevice = prefs.getString("paired_device", "");
+            if (!expectedDevice.isEmpty() && !expectedDevice.equals(device)) throw new IOException("A different counter answered discovery.");
             JSONArray events = snapshot.getJSONArray("events");
             long next = snapshot.getLong("next_seq"), latest = snapshot.getLong("latest_seq");
             if (next < 0 || next > latest || events.length() > 16) throw new IOException("Invalid counter event page.");
@@ -196,11 +235,13 @@ public final class CounterService extends Service {
                 }
                 MonitorPolicy.Change change = policy.accept(device, boot, mode, snapshot.getInt("count"),
                         snapshot.getInt("target"), snapshot.getBoolean("alarm_active"), next, SystemClock.elapsedRealtime());
-                if (change.connected) activity("Counter got connected", "Local Wi-Fi monitoring is active.", 10);
-                if (change.restarted) activity("Counter restarted", "Counter rebooted. Reason: " + snapshot.getString("reset_reason"), 11);
-                else if (change.reconnected) activity("Counter reconnected", "Wi-Fi communication has returned.", 12);
-                notifications.cancel(OFFLINE_ID);
-                if (snapshot.getBoolean("gap")) activity("Some earlier events are unavailable", "The dashboard shows the current counter state.", 13);
+                host = requestHost; failures = 0; candidates.clear(); verifiedAt = SystemClock.elapsedRealtime();
+                prefs.edit().putString("host", host).putString("discovery_status", "Paired counter verified on Wi-Fi.").apply();
+                if (change.connected) activity(NotificationType.CONNECTION, "Counter got connected", "Local Wi-Fi monitoring is active.", 10);
+                if (change.restarted) activity(NotificationType.RESTART, "Counter restarted", "Counter rebooted. Reason: " + snapshot.getString("reset_reason"), 11);
+                else if (change.reconnected) activity(NotificationType.CONNECTION, "Counter reconnected", "Wi-Fi communication has returned.", 12);
+                reconcileOfflineNotices();
+                if (snapshot.getBoolean("gap")) activity(NotificationType.MISSING_EVENTS, "Some earlier events are unavailable", "The dashboard shows the current counter state.", 13);
                 for (int i = 0; i < events.length(); i++) {
                     JSONObject event = events.getJSONObject(i);
                     showEvent(boot, event);
@@ -213,19 +254,40 @@ public final class CounterService extends Service {
                 more = snapshot.getBoolean("has_more");
             }
         } catch (Exception error) {
-            if (running) synchronized (policy) { lastError = error.getMessage(); }
+            if (running) synchronized (policy) {
+                lastError = error.getMessage();
+                if (++failures >= 2) requestDiscovery(false);
+            }
         } finally {
             if (connection != null) connection.disconnect();
         }
         if (!running) return;
         synchronized (policy) {
-            String text = policy.offline ? "CRITICAL: counter unreachable" : policy.alarm ?
-                    "ALARM — reset or acknowledge on the physical counter" :
-                    policy.seen ? policy.count + " of " + policy.target + " whistles · " + policy.mode : "Connecting to " + host;
-            notifications.notify(MONITOR_ID, monitorNotification(text));
-            prefs.edit().putString("error", lastError).apply();
+            refreshAcknowledgement();
+            notifications.notify(MONITOR_ID, monitorNotification(monitorText()));
+            prefs.edit().putString("error", visibleError()).apply();
         }
         if (running) handler.postDelayed(this::poll, more ? 100 : 1000);
+    }
+
+    private void requestDiscovery(boolean force) {
+        watchdog.post(() -> {
+            if (!running || (!force && SystemClock.elapsedRealtime() < nextDiscovery)) return;
+            nextDiscovery = SystemClock.elapsedRealtime() + 30_000;
+            final long started = SystemClock.elapsedRealtime();
+            String expected;
+            synchronized (policy) { expected = policy.device.isEmpty() ? prefs.getString("paired_device", "") : policy.device; }
+            prefs.edit().putString("discovery_status", "Looking for your counter on Wi-Fi…").apply();
+            discovery.start(expected, new CounterDiscovery.Listener() {
+                @Override public void onAddress(String address) {
+                    if (running && candidates.size() < 16 && !candidates.contains(address)) candidates.add(address);
+                }
+                @Override public void onDone() {
+                    if (running && verifiedAt < started)
+                        prefs.edit().putString("discovery_status", "No verified counter found yet. Check Wi-Fi, or use the IP in the counter's settings.").apply();
+                }
+            });
+        });
     }
 
     private void checkHealth() {
@@ -235,10 +297,12 @@ public final class CounterService extends Service {
             lastServiceHeartbeat = SystemClock.elapsedRealtime();
         }
         synchronized (policy) {
+            refreshAcknowledgement();
             // Independent from HTTP: a slow or stuck response cannot prevent
             // the missing-heartbeat alarm transition from being evaluated.
             if (policy.timeout(SystemClock.elapsedRealtime())) {
-                updateAlarm(); unreachable(true); save();
+                // Persist the outage token before posting its action button.
+                save(); updateAlarm(); unreachable();
             }
         }
         if (running) watchdog.postDelayed(this::checkHealth, 1000);
@@ -257,26 +321,77 @@ public final class CounterService extends Service {
             default: return;
         }
         int id = 1000 + ((boot + ":" + event.getLong("seq")).hashCode() & 0x3fffffff);
-        activity(title, body, id);
+        NotificationType notification = NotificationType.forEvent(type);
+        if (notification != null) activity(notification, title, body, id);
     }
 
-    private void activity(String title, String body, int id) {
-        notifications.notify(id, base(EVENT_CHANNEL, title, body).setAutoCancel(true).setOnlyAlertOnce(true).build());
+    private void activity(NotificationType type, String title, String body, int id) {
+        if (NotificationSettings.enabled(prefs, type))
+            notifications.notify(type.id, id, base(type.channelId(), title, body).setAutoCancel(true).setOnlyAlertOnce(true).build());
         history(title + " — " + body);
     }
 
-    private void unreachable(boolean recordHistory) {
-        String message = "CRITICAL: Counter powered off or unreachable. Check the cooker immediately if this was not intentional.";
-        notifications.notify(OFFLINE_ID, base(CRITICAL_CHANNEL, "Counter powered off or unreachable", message)
-                .setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_ALARM).build());
-        if (recordHistory) history(message);
+    private void reconcileOfflineNotices() {
+        for (NotificationType type : new NotificationType[]{NotificationType.ACTIVE_DISCONNECT, NotificationType.IDLE_DISCONNECT}) {
+            if (!policy.offline || policy.outageType() != type ||
+                    (type == NotificationType.ACTIVE_DISCONNECT && policy.outageAcknowledged) ||
+                    !NotificationSettings.enabled(prefs, type))
+                notifications.cancel(type.id, OFFLINE_ID);
+        }
+    }
+
+    private void unreachable() {
+        reconcileOfflineNotices();
+        NotificationType type = policy.outageType();
+        boolean critical = policy.criticalOffline();
+        String title = critical ? "Connection lost during counting" : "Counter offline";
+        String message = critical ? "Counter powered off or unreachable before the whistle target was reached. Check the cooker if this was not intentional." :
+                policy.mode.equals("alarm") || policy.count >= policy.target ?
+                "The target was reached before contact was lost. Waiting quietly for the next connection." :
+                "No unfinished counting session was observed. Waiting for the next connection.";
+        if (NotificationSettings.enabled(prefs, type)) {
+            notifications.notify(type.id, OFFLINE_ID, outageNotification(type, title, message, critical));
+        }
+        history((critical ? "CRITICAL: " : "") + message);
+        notifications.notify(MONITOR_ID, monitorNotification(monitorText()));
+    }
+
+    private Notification outageNotification(NotificationType type, String title, String message, boolean critical) {
+        Notification.Builder notice = base(type.channelId(), title, message)
+                .setOngoing(critical).setAutoCancel(!critical).setOnlyAlertOnce(true)
+                .setCategory(critical ? Notification.CATEGORY_ALARM : Notification.CATEGORY_STATUS);
+        if (critical) {
+            Bundle extras = new Bundle(); extras.putString(OutageAcknowledgementReceiver.OUTAGE_ID, policy.outageId);
+            notice.addExtras(extras);
+            PendingIntent acknowledge = PendingIntent.getBroadcast(this, 0,
+                    OutageAcknowledgementReceiver.intent(this, policy.outageId, "acknowledged"),
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            notice.addAction(new Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_notification),
+                    "Acknowledge", acknowledge).build());
+        }
+        return notice.build();
+    }
+
+    private void refreshExistingOutageNotice() {
+        if (!policy.criticalOffline() || !NotificationSettings.enabled(prefs, NotificationType.ACTIVE_DISCONNECT)) return;
+        // Upgrade an existing notice to add its action. Do not recreate a
+        // dismissed/missing notification or sound a persisted outage again.
+        for (android.service.notification.StatusBarNotification notice : notifications.getActiveNotifications()) {
+            if (NotificationType.ACTIVE_DISCONNECT.id.equals(notice.getTag()) && notice.getId() == OFFLINE_ID) {
+                notifications.notify(NotificationType.ACTIVE_DISCONNECT.id, OFFLINE_ID,
+                        outageNotification(NotificationType.ACTIVE_DISCONNECT, "Connection lost during counting",
+                                "Check the cooker. After checking, acknowledge this outage to stop its warning.", true));
+                break;
+            }
+        }
+    }
+
+    private String visibleError() {
+        return policy.offline && !policy.criticalOffline() ? "" : lastError;
     }
 
     private void history(String line) {
-        String old = prefs.getString("history", "");
-        String value = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date()) + "  " + line + "\n\n" + old;
-        if (value.length() > 12000) value = value.substring(0, 12000);
-        prefs.edit().putString("history", value).apply();
+        EventLog.append(prefs, line);
     }
 
     @android.annotation.SuppressLint("ApplySharedPref")
@@ -285,9 +400,10 @@ public final class CounterService extends Service {
         // another page, so a process restart does not replay delivered alerts.
         prefs.edit().putString("boot", policy.boot).putString("device", policy.device).putLong("cursor", policy.cursor)
                 .putBoolean("seen", policy.seen).putBoolean("offline", policy.offline).putBoolean("alarm", policy.alarm)
+                .putString(OutageAcknowledgementReceiver.OUTAGE_ID, policy.outageId)
                 .putString("mode", policy.mode).putInt("count", policy.count).putInt("target", policy.target)
                 .putLong("last_seen_wall", System.currentTimeMillis() - Math.max(0, SystemClock.elapsedRealtime() - policy.lastSuccess))
-                .putString("error", lastError).commit();
+                .putString("error", visibleError()).commit();
         lastSave = SystemClock.elapsedRealtime();
     }
 
@@ -320,7 +436,9 @@ public final class CounterService extends Service {
 
     @Override public void onDestroy() {
         running = false;
+        prefs.unregisterOnSharedPreferenceChangeListener(preferenceChanges);
         watchdog.removeCallbacksAndMessages(null);
+        if (discovery != null) discovery.stop();
         if (handler != null) handler.removeCallbacksAndMessages(null);
         if (thread != null) thread.quitSafely();
         // OS termination must release resources. It is not a supported silence action.

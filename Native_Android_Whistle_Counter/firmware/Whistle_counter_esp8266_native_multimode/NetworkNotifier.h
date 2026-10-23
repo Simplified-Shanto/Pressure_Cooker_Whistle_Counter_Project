@@ -13,4 +13,5 @@ bool publish(const char *type, uint16_t count, uint16_t target);
 bool acknowledgeAlarm();
 bool deliveryFault();
 bool wifiConnected();
+String localAddress();
 }

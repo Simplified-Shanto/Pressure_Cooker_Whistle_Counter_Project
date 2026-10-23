@@ -6,6 +6,8 @@ public final class MonitorPolicy {
     public String boot = "", device = "", mode = "home";
     public long cursor, lastSuccess;
     public boolean seen, offline, alarm;
+    public String outageId = "";
+    public boolean outageAcknowledged;
     public int count, target = 1;
 
     public static final class Change {
@@ -26,6 +28,7 @@ public final class MonitorPolicy {
         change.restarted = seen && !sameBoot;
         device = deviceId; boot = bootId; cursor = nextSequence; mode = newMode;
         count = value; target = goal; seen = true; offline = false;
+        outageId = ""; outageAcknowledged = false;
         // Physical acknowledgement or hardware reset clears completion sound.
         // Reconnection to a still-active physical alarm starts it again.
         alarm = alarmActive; lastSuccess = now;
@@ -35,6 +38,7 @@ public final class MonitorPolicy {
     public boolean timeout(long now) {
         if (!offline && now - lastSuccess >= OFFLINE_MS) {
             offline = true; alarm = false;
+            outageAcknowledged = false; outageId = java.util.UUID.randomUUID().toString();
             return true;
         }
         return false;
@@ -42,5 +46,33 @@ public final class MonitorPolicy {
 
     public boolean canStopMonitoring() {
         return !alarm && (offline || !mode.equals("listening"));
+    }
+
+    public static boolean unfinishedCounting(boolean seen, String mode, int count, int target) {
+        return seen && "listening".equals(mode) && count < target;
+    }
+
+    public boolean criticalOffline() {
+        return offline && !outageAcknowledged && unfinishedCounting(seen, mode, count, target);
+    }
+
+    public void ensureOutageId() {
+        if (offline && outageId.isEmpty()) outageId = java.util.UUID.randomUUID().toString();
+    }
+
+    public boolean acknowledgeOutage(String id) {
+        if (!canAcknowledgeOutage(offline, seen, mode, count, target, alarm, outageId, id) || outageAcknowledged) return false;
+        outageAcknowledged = true;
+        return true;
+    }
+
+    public static boolean canAcknowledgeOutage(boolean offline, boolean seen, String mode,
+            int count, int target, boolean alarm, String currentId, String requestedId) {
+        return offline && !alarm && unfinishedCounting(seen, mode, count, target) &&
+                currentId != null && !currentId.isEmpty() && currentId.equals(requestedId);
+    }
+
+    public NotificationType outageType() {
+        return NotificationType.forOutage(unfinishedCounting(seen, mode, count, target));
     }
 }

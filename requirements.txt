@@ -158,6 +158,19 @@ The PWA uses plain HTML/CSS/JavaScript with no Node.js build dependencies.
 Full setup, wiring, credentials, and phone installation guide:
   WiFi_Whistle_Counter/README.md
 
+7. Native Android app / direct local Wi-Fi alternative
+----------------------------------------------------
+Current alternative source: Native_Android_Whistle_Counter/
+Firmware: firmware/Whistle_counter_esp8266_native_multimode/
+Use the same ESP8266 core 3.1.2, Generic ESP8266 Module, 160 MHz, DOUT,
+4MB (FS:1MB), Only Sketch settings and installed LiquidCrystal_I2C 2.0.0.
+ESP8266mDNS is supplied by the board core; no separate Arduino install is needed.
+The native app needs no hosting or Web Push backend. Android setup, exact Gradle
+and offline QR-scanner versions, and optional QR-exporter dependencies are in:
+  Native_Android_Whistle_Counter/requirements.txt
+IP display and automatic discovery require its updated native firmware.
+See Native_Android_Whistle_Counter/README.md for QR/file pairing and installation.
+
 Sources
 -------
 Repository: MCU_code/*/platformio.ini and the sketch #include declarations.

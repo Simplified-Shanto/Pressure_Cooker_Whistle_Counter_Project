@@ -35,7 +35,9 @@ while cooldown suppresses subsequent bursts after that count.
 | Target is reached | Buzzer alarm runs | Separate completion notification plus a looping alarm tone and vibration |
 | Press a counter button to acknowledge | Alarm stops; returns home | Authenticated next snapshot stops the completion alarm |
 | Press the counter hardware RST button | Reboots; stops its alarm | New authenticated boot identity stops the phone alarm and reports restart |
-| No authenticated contact for 45 seconds | Continues locally if it still has power | Completion tone stops; separate critical **Counter powered off or unreachable** alert appears |
+| No authenticated contact for 45 seconds during unfinished whistle counting | Continues locally if it still has power | One critical **Connection lost during counting** notification, enabled by default |
+| Acknowledge a connection-loss alert on the phone | No command sent; counter may still be off | Current outage becomes quiet; monitoring remains enabled and the acknowledgement is logged |
+| No authenticated contact for 45 seconds after reaching the target, cancellation, or while idle | Off or unreachable | Completion tone stops; waits quietly for the next connection by default |
 | Connection returns, counter still alarming | Buzzer continues | Phone completion alarm starts again |
 | Connection returns after power cycle | Fresh boot/home | Restart/reconnection notification; critical unreachable alert clears |
 
@@ -49,10 +51,151 @@ the phone owner's control; an ordinary app cannot prevent those actions.
 Power-off detection is inferred from missing contact. It takes about 45 seconds
 plus request/scheduling latency, and cannot distinguish counter power loss,
 router failure, phone Wi-Fi loss, or an unreachable counter. If unexpected,
-the critical alert tells the user to check the cooker. This is a separate state,
-not a successful completion acknowledgement.
+the critical alert during unfinished counting tells the user to check the cooker.
+After a confirmed completion, power-off is handled as a normal offline state.
+The app uses the last authenticated counter state: if power disappears before
+the phone observes completion, it cannot infer that the target was reached and
+still treats the last observed unfinished session as critical. Cancellation and
+idle shutdown are quiet by default; stopwatch/timer mode also does not imply an
+unfinished whistle-counting session.
 
 ## Install the Android app
+
+### Version 1.4: acknowledge an intentional or resolved power-off
+
+Install **1.4 (version code 5)** over the existing native app to preserve pairing,
+tones, notification choices, logs, and automatic monitoring. The updated APK is
+in this computer's `Downloads/Whistle-Counter-Local-debug.apk`. **No ESP8266
+reflash is needed.**
+
+If contact is lost during unfinished counting, expand the critical notification
+and tap **Acknowledge** after checking the cooker. Alternatively, open Home and
+tap **Acknowledge power-off alert**, then choose **Intentional power-off** or
+**Checked and resolved**. The critical notification disappears and Home/the
+monitoring indicator show the outage as acknowledged. It can remain offline;
+acknowledgement does not claim the counter has power or change its count.
+
+This silences **only that outage**. It does not disable notification categories
+or automatic monitoring. The acknowledgement survives app/service restarts and
+phone reboot. A fresh authenticated counter response clears the old outage;
+another later loss during unfinished counting gets a new alert and a new
+acknowledgement action. Stale actions from an earlier outage cannot dismiss it.
+Logs record acknowledgement and the selected reason without replaying counts.
+
+**This is separate from the completion alarm.** The acknowledgement action is
+only accepted for an offline, unfinished session and cannot silence a reachable
+counter's target-completion alarm or reset the physical counter.
+
+To check the update, power off during a test session, wait for the critical alert,
+and acknowledge it. Keep the counter off while reopening the app: the same
+outage should stay quiet and monitoring should remain enabled. Power it on,
+start a new test session, and power off again to check that the new outage still
+alerts. Home provides the same action if notification controls are unavailable.
+
+### Version 1.3: separate screens, QR pairing, and automatic address discovery
+
+Install **1.3 (version code 4)** over the existing app to keep pairing, tones,
+notification choices, and monitoring enabled. The app now has three screens:
+
+- **Home**: current count, target, progress, connection, and session guidance.
+- **Settings**: connection/pairing, notification switches, tone, background access.
+- **Logs**: recent counter events, including those with muted notifications.
+
+The bottom navigation switches screens. Notifications use a transparent,
+monochrome cooker silhouette in the status bar and the colored app icon in the
+notification itself. The completion alarm and version 1.2 shutdown behavior are
+retained.
+
+For a new phone, open **Settings → Scan pairing QR** and scan the private setup
+image displayed on this computer. The scanner operates inside the app, without
+an online QR service. Alternatively, transfer `Whistle-Counter-Setup.txt` to the
+phone and select **Import setup file**; no camera permission is needed for that
+route. Confirm **Connect** and grant notifications/background access if asked.
+The 64-character manual key remains under **Manual connection details** as a
+fallback. Existing paired phones do not need to scan or import again.
+
+Generate the private artifacts locally without replacing the existing key:
+
+```sh
+python3 -m venv .local/qr-venv
+.local/qr-venv/bin/pip install -r tools/pairing-requirements.txt
+.local/qr-venv/bin/python tools/export_pairing.py --device <six-hex-chip-id> --host <current-ip>
+```
+
+The host hint is optional; discovery works without it after the firmware update.
+The QR and text file contain the pairing secret: keep them private, like the old
+key. Both are generated in ignored `.local/` and excluded by filename from Git.
+The APK does not contain these credentials. No unauthenticated pairing-key
+download endpoint was added to the counter.
+
+**This feature needs the new ESP8266 firmware for LCD IP display and discovery.**
+Using the same board/Only Sketch settings, upload
+`firmware/Whistle_counter_esp8266_native_multimode/`. The counter advertises
+`WhistleCounter-<chip-id>` as `_whistle._tcp` on Wi-Fi. The phone uses short,
+bounded discovery bursts at startup and after connection failures; an address is
+saved only after the existing HMAC and device-identity checks succeed. Changing
+IP does not reset pairing, the event cursor, or the last session state. If a
+router blocks multicast discovery, use **Settings → Manual connection details**
+and read the current IP on the physical counter.
+
+To see the IP on the LCD: from Home **hold Bottom**, then **tap Bottom four
+times** to reach **5/5 WiFi address**. It updates while the menu is open. Hold
+Bottom to save any detector edits and exit; Top/Middle do nothing on this page.
+The installed LCD uses a fixed **0x27** address on GPIO4 SDA / GPIO5 SCL.
+Startup waits for power to settle and retries the address before initializing
+there even if the initial probe failed. `/status` distinguishes the configured
+address (`lcd_configured_address`) from an acknowledged responder (`lcd_address`,
+zero when none responds); neither field proves that the text is readable.
+`whistle-counter-<chip-id>.local` is also advertised, where the network supports
+mDNS hostnames. [Android's discovery API](https://developer.android.com/develop/connectivity/wifi/use-nsd).
+
+Before the firmware update, the new APK still works with an existing known IP,
+and QR/file import can carry that IP as a hint. LCD/discovery firmware upload and
+actual-phone camera/navigation/notification appearance need physical acceptance
+testing; see `VALIDATION.md` for what was checked here.
+
+### Version 1.2: graceful shutdown and notification choices
+
+Install **1.2 (version code 3)** over the existing native app without uninstalling
+to retain pairing, automatic monitoring, and the selected alarm tone. The update
+copy is in this computer's `Downloads/Whistle-Counter-Local-debug.apk`. **No
+ESP8266 reflash is needed.**
+
+The **Notifications** card has separate switches for connection/reconnection,
+restarts, each whistle, target reached, listening started, listening cancelled,
+physical acknowledgement, timer finished, connection loss during counting,
+idle/completed shutdown, missing history, and background-monitoring attention.
+Choices save immediately and survive reopening/reboot. All default on except
+**Offline while idle or finished**, which defaults off.
+
+Turning a type off removes its currently displayed notifications and prevents
+future notifications of that type. Events remain in Activity, and reenabling a
+type does not replay its past events or an already recorded outage. The normal
+monitoring indicator remains while automatic monitoring is enabled. Android's
+notification settings expose the categories separately for sound/vibration and
+other system preferences; in-app switches do not override Android permissions
+or blocked channels. [Android notification channels](https://developer.android.com/develop/ui/views/notifications/channels).
+
+These switches control notification banners and their sounds. They do **not**
+silence the continuous completion alarm; that still follows physical
+acknowledgement/reset and the missing-contact timeout. In particular, disabling
+**Target reached notification** disables its ordinary banner, not the looping
+completion tone. Losing contact after a target was reached stops that tone at
+the existing 45-second timeout without replacing it with a critical alarm.
+Service recovery no longer sounds the same persisted outage again.
+
+To check this update on the phone:
+
+1. Finish a test session, verify the completion alert, turn the counter off,
+   and wait at least 45 seconds. The tone should stop with no critical popup;
+   the app should show **Counter offline** and continue monitoring.
+2. Start another session, leave its target unfinished, then turn the counter
+   off. After 45 seconds, one critical notification should appear if
+   **Connection lost during counting** is enabled. It should not repeat for the
+   same outage when the app is reopened or its service recovers.
+3. Toggle **Each whistle count** off and check another session. Counts should
+   update in the dashboard and Activity without whistle popups; completion
+   should still ring. Toggle it back on for subsequent counts.
 
 ### Version 1.1: automatic monitoring and selectable alarm sound
 

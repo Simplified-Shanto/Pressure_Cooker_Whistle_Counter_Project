@@ -1,6 +1,7 @@
 #include "NetworkNotifier.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
 #include <LittleFS.h>
 #include <bearssl/bearssl.h>
 extern "C" {
@@ -20,6 +21,7 @@ DetectorSettings detectorSettings;
 uint8_t lcdAddress = 0, key[32];
 uint32_t sequence = 0, alarmId = 0, acknowledgedAlarm = 0, lastReconnect = 0;
 bool fsReady = false, storageFault = false, keyReady = false, connectedBefore = false;
+bool mdnsReady = false;
 String recent[16];
 constexpr uint32_t RETAIN = 128, PAGE = 16;
 
@@ -116,17 +118,18 @@ void serveNative() {
 }
 
 void serveStatus() {
-  char json[560];
+  char json[650];
   snprintf(json, sizeof(json),
       "{\"board\":\"Generic ESP8266 Module\",\"variant\":\"native-android\",\"wifi_connected\":%s,"
       "\"mode\":\"%s\",\"count\":%u,\"target\":%u,\"alarm_active\":%s,\"outbox_ready\":%s,"
-      "\"storage_error\":%s,\"lcd_address\":%u,\"free_heap_bytes\":%u,"
-      "\"detector\":{\"threshold\":%u,\"minimum_sound_ms\":%u,\"ending_quiet_ms\":%u,\"cooldown_ms\":%u}}",
+      "\"storage_error\":%s,\"lcd_address\":%u,\"lcd_configured_address\":%u,\"free_heap_bytes\":%u,"
+      "\"detector\":{\"threshold\":%u,\"minimum_sound_ms\":%u,\"ending_quiet_ms\":%u,\"cooldown_ms\":%u},"
+      "\"discovery_ready\":%s,\"discovery_name\":\"WhistleCounter-%s\"}",
       WiFi.status() == WL_CONNECTED ? "true" : "false", currentMode, count, target,
       !strcmp(currentMode, "alarm") ? "true" : "false", fsReady ? "true" : "false",
-      storageFault ? "true" : "false", lcdAddress, ESP.getFreeHeap(),
+      storageFault ? "true" : "false", lcdAddress, Config::LCD_ADDRESS, ESP.getFreeHeap(),
       detectorSettings.threshold, detectorSettings.minimumDurationMs,
-      detectorSettings.quietDurationMs, detectorSettings.cooldownMs);
+      detectorSettings.quietDurationMs, detectorSettings.cooldownMs, mdnsReady ? "true" : "false", deviceId);
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", json);
 }
@@ -179,14 +182,29 @@ void begin() {
 
 void update() {
   if (WiFi.status() != WL_CONNECTED) {
+    if (mdnsReady) MDNS.close();
+    mdnsReady = false;
     connectedBefore = false;
     if (millis() - lastReconnect >= 10000) { WiFi.reconnect(); lastReconnect = millis(); }
     return;
   }
   if (!connectedBefore) {
     connectedBefore = true;
+    MDNS.close();
+    String hostname = String("whistle-counter-") + deviceId;
+    mdnsReady = MDNS.begin(hostname.c_str());
+    if (mdnsReady) {
+      auto service = MDNS.addService((String("WhistleCounter-") + deviceId).c_str(), "whistle", "tcp", 80);
+      if (service) {
+        MDNS.addServiceTxt(service, "device", deviceId);
+        MDNS.addServiceTxt(service, "protocol", "1");
+      } else {
+        mdnsReady = false;
+      }
+    }
     Serial.print(F("Native app counter IP: ")); Serial.println(WiFi.localIP());
   }
+  if (mdnsReady) MDNS.update();
   server.handleClient();
 }
 
@@ -217,4 +235,7 @@ bool publish(const char *type, uint16_t value, uint16_t goal) {
 bool acknowledgeAlarm() { publish("alarm_acknowledged", count, target); return true; }
 bool deliveryFault() { return storageFault || !keyReady; }
 bool wifiConnected() { return WiFi.status() == WL_CONNECTED; }
+String localAddress() {
+  return WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("Not connected");
+}
 }

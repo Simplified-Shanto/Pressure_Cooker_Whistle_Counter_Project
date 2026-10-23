@@ -21,23 +21,23 @@ void formatTimer(uint32_t remainingSeconds, char *out, size_t length) {
 } // namespace
 
 void Display::begin() {
+  // The installed LCD previously worked at 0x27. Allow its supply to settle
+  // before probing, and always attempt the configured initialization sequence
+  // even if the backpack did not ACK during the initial power-up window.
+  delay(250);
   Wire.begin(Config::LCD_SDA_PIN, Config::LCD_SCL_PIN);
   Wire.setClock(100000);
   Wire.setClockStretchLimit(1500);
-  // Common PCF8574/PCF8574A backpacks use these two addresses. An ACK only
-  // confirms a bus responder; it does not verify the LCD's text or pin map.
-  const uint8_t candidates[] = {Config::LCD_ADDRESS, 0x27, 0x3F};
-  for (uint8_t candidate : candidates) {
-    Wire.beginTransmission(candidate);
-    if (Wire.endTransmission() == 0) { address_ = candidate; break; }
+  address_ = 0;
+  for (uint8_t attempt = 0; attempt < 5; ++attempt) {
+    Wire.beginTransmission(Config::LCD_ADDRESS);
+    if (Wire.endTransmission() == 0) { address_ = Config::LCD_ADDRESS; break; }
+    if (attempt < 4) delay(100);
   }
   if (!address_) {
-    Serial.println(F("LCD not detected at configured address, 0x27, or 0x3F. Check GPIO4 SDA / GPIO5 SCL and power."));
-    return;
+    Serial.printf("LCD has not ACKed 0x%02X; attempting fixed-address initialization anyway.\n", Config::LCD_ADDRESS);
   }
-  Serial.printf("LCD I2C responder: 0x%02X (SDA GPIO%u, SCL GPIO%u)\n",
-                address_, Config::LCD_SDA_PIN, Config::LCD_SCL_PIN);
-  lcd_.reset(new LiquidCrystal_I2C(address_, 16, 2));
+  lcd_.reset(new LiquidCrystal_I2C(Config::LCD_ADDRESS, 16, 2));
   delay(100);
   lcd_->init();
   // Some library implementations call Wire.begin() internally.
@@ -46,6 +46,10 @@ void Display::begin() {
   lcd_->leftToRight();
   lcd_->noAutoscroll();
   lcd_->clear();
+  Wire.beginTransmission(Config::LCD_ADDRESS);
+  address_ = Wire.endTransmission() == 0 ? Config::LCD_ADDRESS : 0;
+  Serial.printf("LCD configured: 0x%02X; ACK after initialization: %s (SDA GPIO%u, SCL GPIO%u)\n",
+                Config::LCD_ADDRESS, address_ ? "yes" : "no", Config::LCD_SDA_PIN, Config::LCD_SCL_PIN);
   previousFirst_[0] = previousSecond_[0] = 0;
 }
 
@@ -94,7 +98,7 @@ void Display::showListening(uint16_t count, uint16_t target,
 
 void Display::showDetectorSettings(uint8_t page, const DetectorSettings &settings,
                                    bool saveFailed) {
-  const char *titles[] = {"1/4 Threshold", "2/4 Min sound", "3/4 End quiet", "4/4 Cooldown"};
+  const char *titles[] = {"1/5 Threshold", "2/5 Min sound", "3/5 End quiet", "4/5 Cooldown"};
   if (page > 3) page = 0;
   char line[32];
   if (page == 0) {
@@ -105,6 +109,10 @@ void Display::showDetectorSettings(uint8_t page, const DetectorSettings &setting
     snprintf(line, sizeof(line), "%u.%us Top+ Mid-", value / 1000, (value % 1000) / 100);
   }
   showLines(saveFailed ? "Save failed!" : titles[page], line);
+}
+
+void Display::showAddress(const char *address) {
+  showLines("5/5 WiFi address", address);
 }
 
 void Display::showWhistleAlarm(uint16_t count, uint16_t target, bool visible) {

@@ -3,6 +3,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -20,6 +23,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".LogsActivity" android:exported="false" />
+        <activity android:name=".PairingScanActivity" android:exported="false"
+            android:theme="@style/zxing_CaptureTheme" />
         <service android:name=".CounterService" android:exported="false"
             android:foregroundServiceType="connectedDevice" android:stopWithTask="false" />
         <service android:name=".RecoveryJob" android:exported="true"
@@ -30,5 +37,6 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <receiver android:name=".OutageAcknowledgementReceiver" android:exported="false" />
     </application>
 </manifest>

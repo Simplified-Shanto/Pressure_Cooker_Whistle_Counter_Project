@@ -15,7 +15,7 @@ constexpr uint8_t TOP_BUTTON_PIN = 12;   // NodeMCU D6
 constexpr uint8_t MIDDLE_BUTTON_PIN = 0; // NodeMCU D3
 constexpr uint8_t BOTTOM_BUTTON_PIN = 2; // NodeMCU D4
 constexpr uint8_t BUZZER_PIN = 14;       // NodeMCU D5
-constexpr uint8_t LCD_ADDRESS = 0x27;    // Preferred; also probes 0x27 and 0x3F.
+constexpr uint8_t LCD_ADDRESS = 0x27;    // Fixed address verified on this LCD.
 
 // Button and user-interface timing.
 constexpr uint16_t BUTTON_DEBOUNCE_MS = 30;

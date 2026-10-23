@@ -52,4 +52,8 @@ public final class Protocol {
         if (!local) throw new IllegalArgumentException("Use a private home Wi-Fi address (10.x, 172.16–31.x, or 192.168.x).");
         return value;
     }
+
+    public static String optionalLocalHost(String text) {
+        return text.trim().isEmpty() ? "" : localHost(text);
+    }
 }

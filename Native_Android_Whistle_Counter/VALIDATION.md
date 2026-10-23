@@ -1,5 +1,181 @@
 # Native alternative validation — 23 October 2026
 
+## Android 1.4: acknowledge an intentional or resolved outage
+
+The user requested an acknowledgement for a critical connection-loss alert after
+power-off during unfinished counting. Version 1.4 (version code 5) adds an
+**Acknowledge** notification action and a Home-screen button with **Intentional
+power-off** / **Checked and resolved** choices.
+
+Each offline transition has a persisted unique outage identity. Acknowledgement
+stores only that identity, removes its critical notice, and updates the dashboard
+and foreground indicator to acknowledged/offline. Monitoring, pairing, count,
+cursor, and notification-category preferences are retained. Reconnection clears
+the current outage; a subsequent timeout gets a different identity. Old pending
+actions cannot acknowledge the new outage. Persisted acknowledgements are
+restored across service/app restarts rather than recreating the critical warning.
+
+The notification uses an immutable PendingIntent addressed to a non-exported
+BroadcastReceiver, with a distinct data URI per outage. It works without opening
+an Activity or starting a new service. The action validates offline unfinished
+counting and refuses a live/active completion alarm; it sends no counter command.
+The token is saved before the action is posted. Log writes from the service and
+receiver are serialized, and repeated acknowledgement does not append repeatedly.
+The acknowledgement preserves an explicitly paused monitoring preference as well.
+
+Verification completed:
+
+- APK assembly and **53 unit tests passed**: previous 44 plus 9 outage tests.
+  New coverage includes current-outage acknowledgement, preserving count/cursor,
+  repeated calls, long offline periods, process-state restoration, old actions
+  after recovery/new outage, active completion-alarm protection, invalid/idle
+  state rejection, and stable migration of a pre-1.4 outage identity.
+- Android lint: **0 errors, 4 existing pinned SDK/tool/dependency warnings**.
+- APK version **1.4 / code 5**, signature verified against 1.3; unpacked APK
+  contains neither the native pairing key nor Wi-Fi password. Previous APK is
+  retained privately as `.local/rollback/Whistle-Counter-Local-v1.3.apk`.
+- Release copy and Downloads copy hash-verified. SHA-256:
+  `dabc5f5fc407ab3f6f3d04d7e8fe580417ff0f676f3b8f1143de4ad4b3f2c7ff`.
+- This update changed only Android code/docs: **no ESP8266 reflash was performed**.
+
+No Android phone was attached to ADB. Actual notification-button delivery with
+the phone locked and the Home-screen interaction still need the phone acceptance
+test in README.md after installing the update.
+
+## Fixed 0x27 LCD initialization and reflash
+
+At the user's request, the firmware now explicitly initializes the LCD at the
+previously working **0x27** address rather than skipping initialization if a
+startup scan fails. Startup allows 250 ms for power settling and retries the
+configured address up to five times with 100 ms between unsuccessful probes.
+Initialization is attempted even after those probes fail. The post-init probe
+remains diagnostic: `/status` reports both `lcd_configured_address` and the
+actually acknowledged `lcd_address`, without treating configuration as detection.
+
+The new firmware compiled and was uploaded to the idle counter; the 375,056-byte
+flash image's hash verified. **After this upload, the LCD acknowledged 0x27**
+(`lcd_address: 39`, `lcd_configured_address: 39`). Wi-Fi and discovery were
+ready, storage was healthy, and the existing native pairing key authenticated.
+Threshold **29** and timings **800 / 2000 / 10000 ms** were preserved. Snapshots
+are `.local/before-fixed-lcd.json` and `.local/after-fixed-lcd.json`; the private
+binary is `.local/fixed-lcd-firmware.bin`, with the previous discovery firmware
+retained in `.local/rollback/before-fixed-lcd.ino.bin`.
+
+Build usage: RAM 32,988 / 80,192, IRAM including cache 61,567 / 65,536, flash code
+336,300 / 1,048,576 bytes. There were only the existing LCD architecture/Python
+escape warnings. Visual confirmation of readable text/IP menu remains a
+physical-device check; the responding address alone does not prove rendering.
+
+## Android 1.3 and IP/discovery firmware
+
+The user requested a live IP address in the physical settings menu, easier
+pairing, separate Settings/Logs screens, and a visible app notification icon.
+
+Changes implemented:
+
+- Separate Home, Settings, and Logs activities share bottom navigation. Home
+  contains the session count/progress and connection summary; configuration and
+  history no longer fill the same screen. Existing preferences/tone/history are
+  retained. QR/file pairing replaces typing as the primary setup path, with
+  manual fields available as a fallback.
+- Local QR scanning uses ZXing Android Embedded 4.3.0 and core 3.5.3. The strict
+  setup format permits only a native key, optional private IPv4 hint, device ID,
+  and supported format version. Imports are size limited and error messages
+  never include their contents. The QR exporter runs locally with qrcode 8.2
+  and pypng 0.20220715.0; it preserves the existing key. The private QR/text file
+  are ignored by directory and filename. No key download endpoint was added.
+- Android discovers `_whistle._tcp` services in bounded 15-second bursts,
+  retries after communication failures, and pins known counter identity. Hints
+  are accepted as a new stored address only after HMAC/identity validation.
+  Address changes preserve the cursor, pairing, and last session state.
+- Firmware advertises `WhistleCounter-<chip-id>` and
+  `whistle-counter-<chip-id>.local` with the core-bundled ESP8266mDNS library.
+  Settings has a fifth, read-only **WiFi address** page showing the live address
+  or `Not connected`. Detection, alarm acknowledgement, and flash layout remain.
+- Counter notifications now use a white silhouette on a transparent background
+  for the small icon, with the colored cooker icon available as the large icon.
+  The old filled background was unsuitable for Android's monochrome masking.
+
+Verification completed:
+
+- Android assembly and **44 unit tests passed** (34 previous tests plus 6 setup
+  import/parser and 4 discovery/address-selection tests).
+- Android lint passed: **0 errors, 4 pinned SDK/tool/dependency warnings**.
+  Android 8 compatibility was retained using a version-qualified navigation-bar
+  theme; new screen text placeholders are Android string resources.
+- Offline QR was generated and decoded locally with ZXing; decoded data exactly
+  matched the private setup file without printing credentials.
+- APK version **1.3 / code 4** verified, signing certificate matches 1.2, and
+  decompressed APK contains neither local Wi-Fi password nor native pairing key.
+  The APK, private QR, and setup file were copied and hash-verified in Downloads.
+  APK SHA-256: `23453568d3d8fa742bcb1393d8fd10a5f11e074d0feb759f1fb2714c5c7b113a`.
+- ESP8266 firmware compiled: RAM 32,848 / 80,192; IRAM including cache
+  61,567 / 65,536; flash code 336,380 / 1,048,576 bytes. All **23 firmware
+  detector/settings regression tests passed**. Binary retained privately in
+  `.local/discovery-firmware.bin`.
+
+After the user connected the idle counter, **the IP/discovery firmware was
+uploaded successfully** over `/dev/ttyUSB0` with the existing 160 MHz, DOUT,
+4MB (FS:1MB), Only Sketch settings. The 375,008-byte binary's flash hash verified.
+A live UDP DNS-SD query received `WhistleCounter-99eb61._whistle._tcp.local`,
+target `whistle-counter-99eb61.local`, address **192.168.0.116**, port 80. HTTP
+status confirmed discovery ready and healthy storage. The authenticated native
+API still accepted the existing pairing key. Saved threshold **29** and timings
+**800 / 2000 / 10000 ms** were retained. The snapshot is saved privately as
+`.local/after-discovery-upload.json`.
+
+Initially the LCD was **not detected** (`lcd_address: 0`) after upload or a second idle
+hardware reset with stable ESP power. Serial confirmed no ACK at 0x27 or 0x3F;
+the user then requested the prior address explicitly. The fixed-0x27 reflash
+described above restored its ACK; readable text and the IP page still need
+visual confirmation.
+No filesystem initializer, format, or pairing-key change was performed.
+
+DHCP-change recovery, camera scan/navigation, and notification appearance still
+need an Android device check; no ADB phone or Android emulator/KVM is available.
+This build does not claim screenshot-based verification of the new layout.
+
+## Android 1.2: graceful shutdown and per-type notification settings
+
+The user reported critical power-off alerts even after a complete operation.
+The previous service classified every timeout as critical and reposted its
+offline notification on service recovery regardless of the last counter mode.
+
+Version 1.2 (version code 3) classifies an outage as critical only when the last
+authenticated state was `listening` with count below target. Completed, idle,
+cancelled, and first-contact outages use an optional ordinary category, off by
+default. Timeout still stops the completion player/vibration. The dashboard and
+foreground monitoring indicator distinguish critical unfinished counting from
+ordinary offline, and normal offline hides expected connection-error text.
+Persisted outages are not reposted or sounded on service restart; old version
+1.1's unconditional offline notice is removed during upgrade.
+
+Twelve notification categories have independent saved switches and Android
+channels, including separate active/idle disconnect controls. Existing Android
+settings for legacy shared channels are carried into new categories when first
+created. Muted activity still advances the event cursor and remains in history;
+reenabling does not replay it. Turning off a category removes its tagged notices.
+The foreground indicator and continuous physical-counter-controlled completion
+alarm remain independent of the optional banner controls.
+
+Verification completed:
+
+- APK assembly passed; all **34 JUnit tests** passed (17 monitor policy,
+  4 notification category, 4 protocol, 5 recovery, 4 tone-file tests).
+- Regressions cover completion without acknowledgement followed by shutdown,
+  physical acknowledgement/reset/cancellation before shutdown, idle and initial
+  unreachable states, a subsequent unfinished session, reconnect/new outages,
+  and persisted graceful/critical outages. Notification tests verify quiet
+  shutdown defaults, event routing, and independent preference/channel IDs.
+- Android lint passed: **0 errors, 3 existing pinned SDK/tool version warnings**.
+- APK signature verified and certificate matches version 1.1. The decompressed
+  APK contains neither the local pairing key nor Wi-Fi password. Version 1.1 is
+  retained locally under `.local/rollback/Whistle-Counter-Local-v1.1.apk`.
+- No firmware or board settings changed, and no ESP8266 upload was performed.
+- No Android device was attached to ADB. Actual-phone shutdown timing, category
+  switches, channel sounds, and background recovery need the acceptance check
+  documented in README.md after installing this update.
+
 ## Tunable whistle timing update
 
 Research and the reasoning for defaults are recorded in `DETECTION_TUNING.md`.

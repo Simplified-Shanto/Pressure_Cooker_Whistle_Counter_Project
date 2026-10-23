@@ -1,0 +1,3 @@
+# Optional local QR exporter; never uses an online QR service.
+qrcode==8.2
+pypng==0.20220715.0

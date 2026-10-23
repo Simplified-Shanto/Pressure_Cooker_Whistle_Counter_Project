@@ -36,13 +36,15 @@ noise still need a real cooking test.
 ## Adjust on the physical counter
 
 From **Home**, hold **Bottom** for about one second. The LCD starts on
-`1/4 Threshold`. Tap **Bottom** to cycle through:
+`1/5 Threshold`. Tap **Bottom** to cycle through:
 
 1. **Threshold**: amplitude required to begin a candidate. Top adds 3; Middle
    subtracts 3, bounded at 25–900. The existing saved threshold is retained.
 2. **Min sound**: sustained time at or above the start threshold.
 3. **End quiet**: continuous time at or below the ending threshold (`T − 22`).
 4. **Cooldown**: time after an emitted count before another burst can qualify.
+5. **WiFi address**: the current IPv4 address, or `Not connected`. This page is
+   read-only and refreshes live; Top/Middle leave the detection settings unchanged.
 
 On every page, **Top increases** and **Middle decreases** the selected value.
 Timing values are displayed in seconds with one decimal place, such as `1.5s`.

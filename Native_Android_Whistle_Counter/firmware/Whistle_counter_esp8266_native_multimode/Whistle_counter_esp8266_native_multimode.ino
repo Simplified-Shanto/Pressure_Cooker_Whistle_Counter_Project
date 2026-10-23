@@ -39,7 +39,7 @@ uint16_t countedWhistles = 0;
 DetectorSettings detectorSettings;
 bool settingsDirty = false;
 bool settingsSaveFailed = false;
-uint8_t settingsPage = 0; // Threshold, minimum sound, ending quiet, cooldown.
+uint8_t settingsPage = 0; // Threshold, minimum sound, ending quiet, cooldown, IP.
 
 // Stopwatch stores completed time separately from its current running slice,
 // allowing pause/resume without losing any time.
@@ -111,6 +111,7 @@ void leaveThresholdSettings() {
 }
 
 void adjustDetectorSetting(bool increase) {
+  if (settingsPage >= 4) return; // The address page is read-only.
   uint16_t *value;
   uint16_t minimum, maximum, step;
   switch (settingsPage) {
@@ -292,7 +293,7 @@ void handleShortRelease(ButtonId id) {
     case AppMode::THRESHOLD_SETTINGS:
       if (id == TOP) adjustDetectorSetting(true);
       if (id == MIDDLE) adjustDetectorSetting(false);
-      if (id == BOTTOM) settingsPage = (settingsPage + 1) % 4;
+      if (id == BOTTOM) settingsPage = (settingsPage + 1) % 5;
       break;
 
     case AppMode::STOPWATCH:
@@ -371,7 +372,11 @@ void render(bool force) {
                             whistleDetector.filteredEnvelope(), detectorSettings.threshold);
       break;
     case AppMode::THRESHOLD_SETTINGS:
-      display.showDetectorSettings(settingsPage, detectorSettings, settingsSaveFailed);
+      if (settingsPage == 4) {
+        display.showAddress(NetworkNotifier::localAddress().c_str());
+      } else {
+        display.showDetectorSettings(settingsPage, detectorSettings, settingsSaveFailed);
+      }
       break;
     case AppMode::WHISTLE_ALARM:
       display.showWhistleAlarm(countedWhistles, targetWhistles,

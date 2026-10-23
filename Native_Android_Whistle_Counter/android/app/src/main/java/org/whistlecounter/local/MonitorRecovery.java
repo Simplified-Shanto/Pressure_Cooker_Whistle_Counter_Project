@@ -13,7 +13,7 @@ public final class MonitorRecovery {
 
     public static boolean configured(SharedPreferences prefs) {
         try {
-            Protocol.localHost(prefs.getString("host", ""));
+            Protocol.optionalLocalHost(prefs.getString("host", ""));
             Protocol.key(prefs.getString("pairing_key", ""));
             return true;
         } catch (IllegalArgumentException error) { return false; }
@@ -23,6 +23,7 @@ public final class MonitorRecovery {
         JobScheduler jobs = context.getSystemService(JobScheduler.class);
         jobs.cancel(PERIODIC_JOB); jobs.cancel(RECOVERY_JOB);
         context.getSystemService(NotificationManager.class).cancel(ATTENTION_ID);
+        context.getSystemService(NotificationManager.class).cancel(NotificationType.BACKGROUND_HELP.id, ATTENTION_ID);
     }
 
     public static void schedule(Context context) {
@@ -63,6 +64,7 @@ public final class MonitorRecovery {
             context.startForegroundService(new Intent(context, CounterService.class).setAction(CounterService.START));
             prefs.edit().putString("recovery_error", "").apply();
             context.getSystemService(NotificationManager.class).cancel(ATTENTION_ID);
+            context.getSystemService(NotificationManager.class).cancel(NotificationType.BACKGROUND_HELP.id, ATTENTION_ID);
             return true;
         } catch (RuntimeException error) {
             needsAttention(context, "Android blocked automatic monitoring. Check background access and phone autostart settings.");
@@ -73,10 +75,11 @@ public final class MonitorRecovery {
     private static void needsAttention(Context context, String message) {
         context.getSharedPreferences(CounterService.PREFS, Context.MODE_PRIVATE).edit().putString("recovery_error", message).apply();
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (!manager.areNotificationsEnabled()) return;
-        manager.createNotificationChannel(new NotificationChannel("background_help", "Monitoring needs attention", NotificationManager.IMPORTANCE_DEFAULT));
+        SharedPreferences prefs = context.getSharedPreferences(CounterService.PREFS, Context.MODE_PRIVATE);
+        if (!manager.areNotificationsEnabled() || !NotificationSettings.enabled(prefs, NotificationType.BACKGROUND_HELP)) return;
+        NotificationSettings.createChannels(manager);
         PendingIntent open = PendingIntent.getActivity(context, 0, new Intent(context, MainActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        manager.notify(ATTENTION_ID, new Notification.Builder(context, "background_help").setSmallIcon(R.drawable.ic_counter)
+        manager.notify(NotificationType.BACKGROUND_HELP.id, ATTENTION_ID, new Notification.Builder(context, NotificationType.BACKGROUND_HELP.channelId()).setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle("Enable automatic counter monitoring").setContentText(message)
                 .setStyle(new Notification.BigTextStyle().bigText(message)).setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true).build());
     }

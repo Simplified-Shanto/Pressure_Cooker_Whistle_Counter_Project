@@ -20,6 +20,7 @@ class Display {
                      uint16_t threshold);
   void showDetectorSettings(uint8_t page, const DetectorSettings &settings,
                             bool saveFailed);
+  void showAddress(const char *address);
   void showWhistleAlarm(uint16_t count, uint16_t target, bool visible);
   void showStopwatch(uint32_t elapsedMs, bool running);
   void showTimer(uint32_t remainingSeconds, bool running, bool timeUp);

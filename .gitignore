@@ -22,3 +22,8 @@
 **/build/
 **/*.apk
 **/*.keystore
+**/*.bin
+**/*.elf
+# Private QR/setup exports contain the native pairing key.
+**/Whistle-Counter-Pairing.png
+**/Whistle-Counter-Setup.txt
